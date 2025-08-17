@@ -9,6 +9,7 @@
 
 #include <string>
 #include <vector>
+#include <fstream>
 std::string Clerk::Get(std::string key) {
   m_requestId++;
   auto requestId = m_requestId;
@@ -77,26 +78,22 @@ void Clerk::Put(std::string key, std::string value) { PutAppend(key, value, "Put
 void Clerk::Append(std::string key, std::string value) { PutAppend(key, value, "Append"); }
 //初始化客户端
 void Clerk::Init(std::string configFileName) {
-  //获取所有raft节点ip、port ，并进行连接
-  MprpcConfig config;
-  config.LoadConfigFile(configFileName.c_str());
+  // 获取所有raft节点ip、port，并进行连接
   std::vector<std::pair<std::string, short>> ipPortVt;
-  for (int i = 0; i < INT_MAX - 1; ++i) {
-    std::string node = "node" + std::to_string(i);
-
-    std::string nodeIp = config.Load(node + "ip");
-    std::string nodePortStr = config.Load(node + "port");
-    if (nodeIp.empty()) {
-      break;
-    }
-    ipPortVt.emplace_back(nodeIp, atoi(nodePortStr.c_str()));  //沒有atos方法，可以考慮自己实现
+  std::ifstream conf(configFileName);
+  std::string line;
+  while (std::getline(conf, line)) {
+    std::istringstream iss(line);
+    std::string ip;
+    short port;
+    if (!(iss >> ip >> port)) continue; // 跳过格式不对的行
+    ipPortVt.emplace_back(ip, port);
   }
-  //进行连接
+  // 进行gRPC连接
   for (const auto& item : ipPortVt) {
     std::string ip = item.first;
     short port = item.second;
-    // 2024-01-04 todo：bug fix
-    auto* rpc = new raftServerRpcUtil(ip, port);
+    auto* rpc = new raftServerRpcUtil(ip, port); // raftServerRpcUtil 内部已用gRPC实现
     m_servers.push_back(std::shared_ptr<raftServerRpcUtil>(rpc));
   }
 }

@@ -30,7 +30,7 @@ constexpr int Voted = 1;   //本轮已经投过票了
 constexpr int Expire = 2;  //投票（消息、竞选者）过期
 constexpr int Normal = 3;
 
-class Raft : public raftRpcProctoc::raftRpc {
+class Raft : public raftRpcProctoc::raftRpc::Service {
  private:
   std::mutex m_mtx;
   std::vector<std::shared_ptr<RaftRpcUtil>> m_peers; // 存储多个RaftRpcUtil实例的共享指针，用于管理和维护与所有对等节点的RPC通信
@@ -118,16 +118,18 @@ public:
   // 即服务层主动发起请求raft保存snapshot里面的数据，index是用来表示snapshot快照执行到了哪条命令
   void Snapshot(int index, std::string snapshot);
 
+
  public:
-  // 重写基类方法,因为rpc远程调用真正调用的是这个方法
-  //序列化，反序列化等操作rpc框架都已经做完了，因此这里只需要获取值然后真正调用本地方法即可。
-  void AppendEntries(google::protobuf::RpcController *controller, const ::raftRpcProctoc::AppendEntriesArgs *request,
-                     ::raftRpcProctoc::AppendEntriesReply *response, ::google::protobuf::Closure *done) override;
-  void InstallSnapshot(google::protobuf::RpcController *controller,
-                       const ::raftRpcProctoc::InstallSnapshotRequest *request,
-                       ::raftRpcProctoc::InstallSnapshotResponse *response, ::google::protobuf::Closure *done) override;
-  void RequestVote(google::protobuf::RpcController *controller, const ::raftRpcProctoc::RequestVoteArgs *request,
-                   ::raftRpcProctoc::RequestVoteReply *response, ::google::protobuf::Closure *done) override;
+  // gRPC风格Raft服务接口声明
+  grpc::Status AppendEntries(grpc::ServerContext* context,
+                             const raftRpcProctoc::AppendEntriesArgs* request,
+                             raftRpcProctoc::AppendEntriesReply* response) override;
+  grpc::Status InstallSnapshot(grpc::ServerContext* context,
+                               const raftRpcProctoc::InstallSnapshotRequest* request,
+                               raftRpcProctoc::InstallSnapshotResponse* response) override;
+  grpc::Status RequestVote(grpc::ServerContext* context,
+                           const raftRpcProctoc::RequestVoteArgs* request,
+                           raftRpcProctoc::RequestVoteReply* response) override;
 
  public:
   void init(std::vector<std::shared_ptr<RaftRpcUtil>> peers, int me, std::shared_ptr<Persister> persister,

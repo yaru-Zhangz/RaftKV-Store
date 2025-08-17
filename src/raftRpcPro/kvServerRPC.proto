@@ -3,7 +3,6 @@ syntax = "proto3";
 
 package raftKVRpcProctoc; //所在的命名空间
 
-option cc_generic_services = true;  //开启stub服务
 
 // 日志实体
 message GetArgs{

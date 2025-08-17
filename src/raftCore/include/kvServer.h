@@ -18,11 +18,11 @@
 #include <iostream>
 #include <mutex>
 #include <unordered_map>
-#include "kvServerRPC.pb.h"
+#include "kvServerRPC.grpc.pb.h"
 #include "raft.h"
 #include "skipList.h"
 
-class KvServer : raftKVRpcProctoc::kvServerRpc {
+class KvServer : public raftKVRpcProctoc::kvServerRpc::Service {
  private:
   std::mutex m_mtx;
   int m_me;
@@ -68,10 +68,9 @@ class KvServer : raftKVRpcProctoc::kvServerRpc {
   bool ifRequestDuplicate(std::string ClientId, int RequestId);
 
   // clerk 使用RPC远程调用下面这两个方法
+  // 原有业务逻辑接口，供gRPC接口调用
   void PutAppend(const raftKVRpcProctoc::PutAppendArgs *args, raftKVRpcProctoc::PutAppendReply *reply);
-  void Get(const raftKVRpcProctoc::GetArgs *args,
-    raftKVRpcProctoc::GetReply
-        *reply);  //将 GetArgs 改为rpc调用的，因为是远程客户端，即服务器宕机对客户端来说是无感的
+  void Get(const raftKVRpcProctoc::GetArgs *args, raftKVRpcProctoc::GetReply *reply);
 
   ////一直等待raft传来的applyCh
   void ReadRaftApplyCommandLoop();
@@ -88,12 +87,10 @@ class KvServer : raftKVRpcProctoc::kvServerRpc {
 
   std::string MakeSnapShot();
 
- public:  // for rpc
-  void PutAppend(google::protobuf::RpcController *controller, const ::raftKVRpcProctoc::PutAppendArgs *request,
-                 ::raftKVRpcProctoc::PutAppendReply *response, ::google::protobuf::Closure *done) override;
 
-  void Get(google::protobuf::RpcController *controller, const ::raftKVRpcProctoc::GetArgs *request,
-           ::raftKVRpcProctoc::GetReply *response, ::google::protobuf::Closure *done) override;
+ public:  // for gRPC
+  grpc::Status Get(grpc::ServerContext* context, const raftKVRpcProctoc::GetArgs* request, raftKVRpcProctoc::GetReply* response) override;
+  grpc::Status PutAppend(grpc::ServerContext* context, const raftKVRpcProctoc::PutAppendArgs* request, raftKVRpcProctoc::PutAppendReply* response) override;
 
   /////////////////serialiazation start ///////////////////////////////
   // notice ： func serialize

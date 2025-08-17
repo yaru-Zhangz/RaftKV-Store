@@ -2,9 +2,15 @@
 cmake_minimum_required(VERSION 3.22)
 project(KVRaftCpp)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_BUILD_TYPE "Debug")
 
+# 设置gRPC和protobuf的CMake查找路径（如有必要）
+set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/usr/local/lib64/cmake;/usr/local/lib/cmake")
 
-
+# 查找protobuf和gRPC包
+find_package(Protobuf CONFIG REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
 
 
 set(CMAKE_CXX_STANDARD 20)
@@ -20,13 +26,11 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 # 目前可能存在路径污染的问题，需要进一步解决
 include_directories(${PROJECT_SOURCE_DIR}/src/common/include)
 include_directories(${PROJECT_SOURCE_DIR}/src/fiber/include)
-include_directories(${PROJECT_SOURCE_DIR}/src/rpc/include)
 include_directories(${PROJECT_SOURCE_DIR}/example)
 include_directories(${PROJECT_SOURCE_DIR}/src/raftCore/include)
 include_directories(${PROJECT_SOURCE_DIR}/src/raftRpcPro/include)
 include_directories(${PROJECT_SOURCE_DIR}/src/raftClerk/include)
 include_directories(${PROJECT_SOURCE_DIR}/src/skipList/include)
-
 
 # 设置项目库文件搜索路径 -L
 link_directories(${PROJECT_SOURCE_DIR}/lib)
@@ -36,8 +40,15 @@ add_subdirectory(src)
 # example包含了使用的示例代码
 add_subdirectory(example)
 
-add_library(skip_list_on_raft STATIC  ${src_rpc} ${src_fiber} ${rpc_example} ${raftsource} ${src_raftCore} ${src_raftRpcPro})
-target_link_libraries(skip_list_on_raft muduo_net muduo_base pthread dl)
+add_library(skip_list_on_raft STATIC ${src_fiber} ${rpc_example} ${raftsource} ${src_raftCore} ${src_raftRpcPro} ${src_common})
+
+# 主库链接gRPC和protobuf
+target_link_libraries(skip_list_on_raft
+        pthread dl
+        gRPC::grpc++ 
+        protobuf::libprotobuf
+        boost_serialization
+)
 # 添加格式化目标 start
 # from : https://blog.csdn.net/guotianqing/article/details/121661067
 

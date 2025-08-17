@@ -1,8 +1,7 @@
 #include "kvServer.h"
 
-#include <rpcprovider.h>
-
-#include "mprpcconfig.h"
+#include <grpcpp/grpcpp.h>
+#include "kvServerRPC.grpc.pb.h"
 
 void KvServer::DprintfKVDB() {
   if (!Debug) {
@@ -349,16 +348,14 @@ std::string KvServer::MakeSnapShot() {
   return snapshotData;
 }
 
-void KvServer::PutAppend(google::protobuf::RpcController *controller, const ::raftKVRpcProctoc::PutAppendArgs *request,
-                         ::raftKVRpcProctoc::PutAppendReply *response, ::google::protobuf::Closure *done) {
-  KvServer::PutAppend(request, response);
-  done->Run();
+grpc::Status KvServer::Get(grpc::ServerContext* context, const raftKVRpcProctoc::GetArgs* request, raftKVRpcProctoc::GetReply* response) {
+    this->Get(request, response);
+    return grpc::Status::OK;
 }
 
-void KvServer::Get(google::protobuf::RpcController *controller, const ::raftKVRpcProctoc::GetArgs *request,
-                   ::raftKVRpcProctoc::GetReply *response, ::google::protobuf::Closure *done) {
-  KvServer::Get(request, response);
-  done->Run();
+grpc::Status KvServer::PutAppend(grpc::ServerContext* context, const raftKVRpcProctoc::PutAppendArgs* request, raftKVRpcProctoc::PutAppendReply* response) {
+    this->PutAppend(request, response);
+    return grpc::Status::OK;
 }
 
 KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFileName, short port) : m_skipList(6) {
@@ -372,14 +369,15 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFileName, shor
   m_raftNode = std::make_shared<Raft>();
   ////////////////clerk层面 kvserver开启rpc接受功能
   //    同时raft与raft节点之间也要开启rpc功能，因此有两个注册
+  // 启动gRPC服务端，注册本服务
   std::thread t([this, port]() -> void {
-    // provider是一个rpc网络服务对象。把UserService对象发布到rpc节点上
-    RpcProvider provider;
-    provider.NotifyService(this);
-    provider.NotifyService(
-        this->m_raftNode.get());  // todo：这里获取了原始指针，后面检查一下有没有泄露的问题 或者 shareptr释放的问题
-    // 启动一个rpc服务发布节点   Run以后，进程进入阻塞状态，等待远程的rpc调用请求
-    provider.Run(m_me, port);
+    std::string server_address = "0.0.0.0:" + std::to_string(port);
+    grpc::ServerBuilder builder;
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.RegisterService(this);
+    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+    std::cout << "gRPC server listening on " << server_address << std::endl;
+    server->Wait();
   });
   t.detach();
 
@@ -388,22 +386,20 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFileName, shor
   std::cout << "raftServer node:" << m_me << " start to sleep to wait all ohter raftnode start!!!!" << std::endl;
   sleep(6);
   std::cout << "raftServer node:" << m_me << " wake up!!!! start to connect other raftnode" << std::endl;
-  //获取所有raft节点ip、port ，并进行连接  ,要排除自己
-  MprpcConfig config;
-  config.LoadConfigFile(nodeInforFileName.c_str());
+  // gRPC方式读取raft节点ip/port并连接
   std::vector<std::pair<std::string, short> > ipPortVt;
-  for (int i = 0; i < INT_MAX - 1; ++i) {
-    std::string node = "node" + std::to_string(i);
-
-    std::string nodeIp = config.Load(node + "ip");
-    std::string nodePortStr = config.Load(node + "port");
-    if (nodeIp.empty()) {
-      break;
-    }
-    ipPortVt.emplace_back(nodeIp, atoi(nodePortStr.c_str()));  //沒有atos方法，可以考慮自己实现
+  std::ifstream conf(nodeInforFileName);
+  std::string line;
+  int idx = 0;
+  while (std::getline(conf, line)) {
+    std::istringstream iss(line);
+    std::string ip;
+    short port;
+    if (!(iss >> ip >> port)) continue; // 跳过格式不对的行
+    ipPortVt.emplace_back(ip, port);
+    ++idx;
   }
   std::vector<std::shared_ptr<RaftRpcUtil> > servers;
-  //进行连接
   for (int i = 0; i < ipPortVt.size(); ++i) {
     if (i == m_me) {
       servers.push_back(nullptr);
@@ -411,10 +407,8 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFileName, shor
     }
     std::string otherNodeIp = ipPortVt[i].first;
     short otherNodePort = ipPortVt[i].second;
-    auto *rpc = new RaftRpcUtil(otherNodeIp, otherNodePort);
-    servers.push_back(std::shared_ptr<RaftRpcUtil>(rpc));
-
-    std::cout << "node" << m_me << " 连接node" << i << "success!" << std::endl;
+    servers.push_back(std::make_shared<RaftRpcUtil>(otherNodeIp, otherNodePort));
+    std::cout << "node" << m_me << " 连接node" << i << " success!" << std::endl;
   }
   sleep(ipPortVt.size() - me);  //等待所有节点相互连接成功，再启动raft
   m_raftNode->init(servers, m_me, persister, applyChan);

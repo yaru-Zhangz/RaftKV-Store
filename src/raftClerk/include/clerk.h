@@ -13,8 +13,7 @@
 #include <cerrno>
 #include <string>
 #include <vector>
-#include "kvServerRPC.pb.h"
-#include "mprpcconfig.h"
+#include "kvServerRPC.grpc.pb.h"
 class Clerk {
  private:
   std::vector<std::shared_ptr<raftServerRpcUtil>> m_servers;  //保存所有raft节点的fd //todo：全部初始化为-1，表示没有连接上

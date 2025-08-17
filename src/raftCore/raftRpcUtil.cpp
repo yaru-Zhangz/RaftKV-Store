@@ -4,34 +4,34 @@
 
 #include "raftRpcUtil.h"
 
-#include <mprpcchannel.h>
-#include <mprpccontroller.h>
+#include <grpcpp/grpcpp.h>
+#include "raftRPC.grpc.pb.h"
 
 bool RaftRpcUtil::AppendEntries(raftRpcProctoc::AppendEntriesArgs *args, raftRpcProctoc::AppendEntriesReply *response) {
-  MprpcController controller;
-  stub_->AppendEntries(&controller, args, response, nullptr);
-  return !controller.Failed();
+  grpc::ClientContext context;
+  grpc::Status status = stub_->AppendEntries(&context, *args, response);
+  return status.ok();
 }
 
 bool RaftRpcUtil::InstallSnapshot(raftRpcProctoc::InstallSnapshotRequest *args,
                                   raftRpcProctoc::InstallSnapshotResponse *response) {
-  MprpcController controller;
-  stub_->InstallSnapshot(&controller, args, response, nullptr);
-  return !controller.Failed();
+  grpc::ClientContext context;
+  grpc::Status status = stub_->InstallSnapshot(&context, *args, response);
+  return status.ok();
 }
 
 bool RaftRpcUtil::RequestVote(raftRpcProctoc::RequestVoteArgs *args, raftRpcProctoc::RequestVoteReply *response) {
-  MprpcController controller;
-  stub_->RequestVote(&controller, args, response, nullptr);
-  return !controller.Failed();
+  grpc::ClientContext context;
+  grpc::Status status = stub_->RequestVote(&context, *args, response);
+  return status.ok();
 }
 
 //先开启服务器，再尝试连接其他的节点，中间给一个间隔时间，等待其他的rpc服务器节点启动
 
 RaftRpcUtil::RaftRpcUtil(std::string ip, short port) {
-  //*********************************************  */
-  //发送rpc设置
-  stub_ = new raftRpcProctoc::raftRpc_Stub(new MprpcChannel(ip, port, true));
+  std::string target = ip + ":" + std::to_string(port);
+  auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+  stub_ = raftRpcProctoc::raftRpc::NewStub(channel);
 }
 
-RaftRpcUtil::~RaftRpcUtil() { delete stub_; }
+RaftRpcUtil::~RaftRpcUtil() = default;

@@ -1,7 +1,3 @@
-//
-// Created by swx on 23-12-23.
-//
-
 #ifndef CONFIG_H
 #define CONFIG_H
 
