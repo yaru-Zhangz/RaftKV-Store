@@ -1,6 +1,3 @@
-//
-// Created by swx on 24-1-4.
-//
 #include "raftServerRpcUtil.h"
 
 // kvserver不同于raft节点之间，kvserver的rpc是用于clerk向kvserver调用，不会被调用，因此只用写caller功能，不用写callee功能

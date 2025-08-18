@@ -1,9 +1,6 @@
 #ifndef RAFT_H
 #define RAFT_H
 
-#include <boost/serialization/string.hpp>
-#include <boost/serialization/vector.hpp>
-#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -11,102 +8,108 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <chrono>
+
+#include <boost/serialization/string.hpp>
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/serialization.hpp>
+#include <boost/any.hpp>
+
 #include "ApplyMsg.h"
 #include "Persister.h"
-#include "boost/any.hpp"
-#include "boost/serialization/serialization.hpp"
 #include "config.h"
 #include "monsoon.h"
 #include "raftRpcUtil.h"
 #include "util.h"
-/// @brief //////////// 网络状态表示  todo：可以在rpc中删除该字段，实际生产中是用不到的.
-constexpr int Disconnected = 0;  // 方便网络分区的时候debug，网络异常的时候为disconnected，只要网络正常就为AppNormal，防止matchIndex[]数组异常减小
-constexpr int AppNormal = 1;
+//  表示节点的网络状态
+constexpr int Disconnected = 0;  // 网络异常
+constexpr int AppNormal = 1;     //网络正常 
 
-///////////////投票状态
-
+// 网络正常
 constexpr int Killed = 0;
-constexpr int Voted = 1;   //本轮已经投过票了
-constexpr int Expire = 2;  //投票（消息、竞选者）过期
+constexpr int Voted = 1;   // 本任期内已投票
+constexpr int Expire = 2;  // 投票（消息、竞选者）过期
 constexpr int Normal = 3;
 
 class Raft : public raftRpcProctoc::raftRpc::Service {
  private:
   std::mutex m_mtx;
-  std::vector<std::shared_ptr<RaftRpcUtil>> m_peers; // 存储多个RaftRpcUtil实例的共享指针，用于管理和维护与所有对等节点的RPC通信
-  std::shared_ptr<Persister> m_persister; // 持久层，存储raft节点的状态和快照
+  std::vector<std::shared_ptr<RaftRpcUtil>> m_peers; // 保存所有对等节点的RPC工具对象，用于与其他节点通信
+  std::shared_ptr<Persister> m_persister;            // 持久化对象，负责保存和回复节点状态，如日志、快照等
  
-  int m_me;  // 自己的编号
-  int m_currentTerm; // 当前任期
-  int m_votedFor; // 当前任期给谁投过票
-  std::vector<raftRpcProctoc::LogEntry> m_logs;  // 日志条目<日志索引，任期号，指令>数组
-  // 这两个状态所有结点都在维护，易失
-  int m_commitIndex;  // 已经提交的日志索引
-  int m_lastApplied;  // 已经汇报给状态机（上层应用）的log 的index
+  int m_me;           // 当前节点编号
+  int m_currentTerm;  // 当前任期号
+  int m_votedFor;     // 当前任期已投票给的候选人编号
+  std::vector<raftRpcProctoc::LogEntry> m_logs;  // 日志条目数组 <日志索引，任期号，指令>
+ 
+  int m_commitIndex;  // 已提交日志的最大索引
+  int m_lastApplied;  // 已应用到状态机的最大日志索引
 
-  // 这两个状态是由服务器来维护，易失
-  std::vector<int> m_nextIndex;  // 下一个要发送给追随者的索引
-  std::vector<int> m_matchIndex;  // 追随者返回给领导者已经收到多少日志条目的索引
-  enum Status { Follower, Candidate, Leader };
-  // 当前的身份
+  std::vector<int> m_nextIndex;   // 每个follower下一个要同步的日志索引
+  std::vector<int> m_matchIndex;  // 每个follwer已同步的最大日志索引
+
+  // Raft节点的三种状态
+  enum Status { 
+    Follower, 
+    Candidate, 
+    Leader 
+  };
+
+  // 当前节点身份
   Status m_status;
 
-  std::shared_ptr<LockQueue<ApplyMsg>> applyChan;  // client从这里取日志，client与raft通信的接口
+  std::shared_ptr<LockQueue<ApplyMsg>> applyChan;  // 日志应用消息队列，client从这里取日志
 
-  // 选举超时
-  std::chrono::_V2::system_clock::time_point m_lastResetElectionTime;
-  // 心跳超时
-  std::chrono::_V2::system_clock::time_point m_lastResetHearBeatTime;
 
-  // 用于传入快照点
-  // 储存了快照中的最后一个日志的Index和Term
-  int m_lastSnapshotIncludeIndex;
-  int m_lastSnapshotIncludeTerm;
+  std::chrono::_V2::system_clock::time_point m_lastResetElectionTime; // 记录上次重置选举超时的时间点
+  std::chrono::_V2::system_clock::time_point m_lastResetHearBeatTime; // 记录上次重置心跳超时的时间点
 
-  // 协程
-  std::unique_ptr<monsoon::IOManager> m_ioManager = nullptr;
+
+  int m_lastSnapshotIncludeIndex; // 快照中最后一个日志的索引
+  int m_lastSnapshotIncludeTerm;  // 快照中最后一个日志的任期
+
+  std::unique_ptr<monsoon::IOManager> m_ioManager = nullptr;  // 协程调度器
 
 public:
-  // 这三个后面有重写，分别用于：日志同步+发送心跳；安装快照；发起投票
+  // 处理三种RPC请求的内部实现
   void AppendEntries1(const raftRpcProctoc::AppendEntriesArgs *args, raftRpcProctoc::AppendEntriesReply *reply);
   void InstallSnapshot(const raftRpcProctoc::InstallSnapshotRequest *args, raftRpcProctoc::InstallSnapshotResponse *reply);
   void RequestVote(const raftRpcProctoc::RequestVoteArgs *args, raftRpcProctoc::RequestVoteReply *reply);
 
-  // 定期向状态机写入日志
-  void applierTicker();
-  // 没有什么用，直接返回true的
-  bool CondInstallSnapshot(int lastIncludedTerm, int lastIncludedIndex, std::string snapshot);
-  void doElection(); // 发起选举
-  void doHeartBeat(); // leader发送心跳
-  void electionTimeOutTicker(); // 监控是否发起选举
-  std::vector<ApplyMsg> getApplyLogs(); // 获取应用日志
-  int getNewCommandIndex(); // 获取新命令的索引
-  void getPrevLogInfo(int server, int *preIndex, int *preTerm); // 
+  void applierTicker();                     // 定期将日志应用到状态机
+  bool CondInstallSnapshot(int lastIncludedTerm, int lastIncludedIndex, std::string snapshot);  // 检查快照是否需要安装
+  void doElection();                        // 发起选举流程
+  void doHeartBeat();                       // 作为Leader定期发送心跳
+  void electionTimeOutTicker();             // 检查是否需要发起选举
+  std::vector<ApplyMsg> getApplyLogs();     // 获取需要应用的日志
+  int getNewCommandIndex();                 // 获取新命令的日志索引
+  void getPrevLogInfo(int server, int *preIndex, int *preTerm); // 获取指定follower的前一个日志索引和任期
   void GetState(int *term, bool *isLeader); // 查看当前节点是否是领导节点
-  void leaderHearBeatTicker(); // 负责查看是否该发送心跳了
-  void leaderSendSnapShot(int server); // leader发送快照
-  void leaderUpdateCommitIndex(); // 
-  bool matchLog(int logIndex, int logTerm);
-  void persist();
-  bool UpToDate(int index, int term);
-  int getLastLogIndex();
-  int getLastLogTerm();
-  void getLastLogIndexAndTerm(int *lastLogIndex, int *lastLogTerm);
-  int getLogTermFromLogIndex(int logIndex);
-  int GetRaftStateSize();
-  int getSlicesIndexFromLogIndex(int logIndex);
+  void leaderHearBeatTicker();              // 定期检查是否需要发送心跳
+  void leaderSendSnapShot(int server);      // Leader向Follower发送快照
+  void leaderUpdateCommitIndex();           // Leader更新已提交的日志索引
+  bool matchLog(int logIndex, int logTerm); // 判断日志是否匹配
+  void persist();                           // 持久化当前状态
+  bool UpToDate(int index, int term);       // 判断日志是否比当前节点新
+  int getLastLogIndex();                    // 获取最后一条日志的索引
+  int getLastLogTerm();                     // 获取最后一条日志的任期号
+  void getLastLogIndexAndTerm(int *lastLogIndex, int *lastLogTerm); // 获取最后一条日志的索引和任期
+  int getLogTermFromLogIndex(int logIndex); // 获取指定日志索引的任期
+  int GetRaftStateSize();                   // 获取当前raft状态
+  int getSlicesIndexFromLogIndex(int logIndex); // 将逻辑日志索引转换为物理数组下标
 
+  // 发送RequestVote RPC
   bool sendRequestVote(int server, std::shared_ptr<raftRpcProctoc::RequestVoteArgs> args,
                        std::shared_ptr<raftRpcProctoc::RequestVoteReply> reply, std::shared_ptr<int> votedNum);
+  // 发送AppendEntries RPC
   bool sendAppendEntries(int server, std::shared_ptr<raftRpcProctoc::AppendEntriesArgs> args,
                          std::shared_ptr<raftRpcProctoc::AppendEntriesReply> reply, std::shared_ptr<int> appendNums);
+  
+  void pushMsgToKvServer(ApplyMsg msg);   // 向kvserver推送ApplyMsg
+  void readPersist(std::string data);     // 从持久化数据恢复状态
+  std::string persistData();              // 获取当前状态的持久化数据
 
-  // rf.applyChan <- msg //不拿锁执行  可以单独创建一个线程执行，但是为了统一使用std:thread
-  // ，避免使用pthread_create，因此专门写一个函数来执行
-  void pushMsgToKvServer(ApplyMsg msg);
-  void readPersist(std::string data);
-  std::string persistData();
-
+  // Raft对外暴露的命令入口
   void Start(Op command, int *newLogIndex, int *newLogTerm, bool *isLeader);
 
   // Snapshot the service says it has created a snapshot that has
@@ -116,11 +119,12 @@ public:
   // index代表是快照apply应用的index,而snapshot代表的是上层service传来的快照字节流，包括了Index之前的数据
   // 这个函数的目的是把安装到快照里的日志抛弃，并安装快照数据，同时更新快照下标，属于peers自身主动更新，与leader发送快照不冲突
   // 即服务层主动发起请求raft保存snapshot里面的数据，index是用来表示snapshot快照执行到了哪条命令
+  // 安装快照，丢弃快照前的日志
   void Snapshot(int index, std::string snapshot);
 
 
  public:
-  // gRPC风格Raft服务接口声明
+  // gRPC服务端接口重载
   grpc::Status AppendEntries(grpc::ServerContext* context,
                              const raftRpcProctoc::AppendEntriesArgs* request,
                              raftRpcProctoc::AppendEntriesReply* response) override;
@@ -136,30 +140,24 @@ public:
             std::shared_ptr<LockQueue<ApplyMsg>> applyCh);
 
  private:
-  // for persist
-
+  // Raft节点持久化数据结构，支持boost序列化
   class BoostPersistRaftNode {
    public:
-    friend class boost::serialization::access;
-    // When the class Archive corresponds to an output archive, the
-    // & operator is defined similar to <<.  Likewise, when the class Archive
-    // is a type of input archive the & operator is defined similar to >>.
-    template <class Archive>
-    void serialize(Archive &ar, const unsigned int version) {
-      ar &m_currentTerm;
-      ar &m_votedFor;
-      ar &m_lastSnapshotIncludeIndex;
-      ar &m_lastSnapshotIncludeTerm;
-      ar &m_logs;
-    }
-    int m_currentTerm;
-    int m_votedFor;
-    int m_lastSnapshotIncludeIndex;
-    int m_lastSnapshotIncludeTerm;
-    std::vector<std::string> m_logs;
-    std::unordered_map<std::string, int> umap;
-
-   public:
+      friend class boost::serialization::access;
+      template <class Archive>
+      void serialize(Archive &ar, const unsigned int version) {
+        ar &m_currentTerm;
+        ar &m_votedFor;
+        ar &m_lastSnapshotIncludeIndex;
+        ar &m_lastSnapshotIncludeTerm;
+        ar &m_logs;
+      }
+      int m_currentTerm;
+      int m_votedFor;
+      int m_lastSnapshotIncludeIndex;
+      int m_lastSnapshotIncludeTerm;
+      std::vector<std::string> m_logs;
+      std::unordered_map<std::string, int> umap;
   };
 };
 

@@ -220,6 +220,7 @@ void Raft::doElection() {
     //	重新设置定时器
     m_lastResetElectionTime = now();
     //	发布RequestVote RPC
+    DPrintf("m_peers.size = {%d}", m_peers.size());
     for (int i = 0; i < m_peers.size(); i++) {
       if (i == m_me) {
         continue;

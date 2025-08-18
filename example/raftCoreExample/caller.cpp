@@ -1,6 +1,3 @@
-//
-// Created by swx on 23-6-4.
-//
 #include <iostream>
 #include "clerk.h"
 #include "util.h"

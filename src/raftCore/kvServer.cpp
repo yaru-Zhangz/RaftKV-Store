@@ -1,5 +1,5 @@
 #include "kvServer.h"
-
+#include "util.h"
 #include <grpcpp/grpcpp.h>
 #include "kvServerRPC.grpc.pb.h"
 
@@ -363,58 +363,70 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFileName, shor
 
   m_me = me;
   m_maxRaftState = maxraftstate;
-
   applyChan = std::make_shared<LockQueue<ApplyMsg> >();
-
   m_raftNode = std::make_shared<Raft>();
+
   ////////////////clerk层面 kvserver开启rpc接受功能
   //    同时raft与raft节点之间也要开启rpc功能，因此有两个注册
-  // 启动gRPC服务端，注册本服务
+  // 读取所有raft节点ip、port，并进行连接
+
   std::thread t([this, port]() -> void {
-    std::string server_address = "0.0.0.0:" + std::to_string(port);
+    std::string my_ip = writeConfig(m_me, port);
+    std::string server_address = my_ip + ":" + std::to_string(port);
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     builder.RegisterService(this);
+    builder.RegisterService(m_raftNode.get());
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "gRPC server listening on " << server_address << std::endl;
     server->Wait();
   });
   t.detach();
 
-  ////开启rpc远程调用能力，需要注意必须要保证所有节点都开启rpc接受功能之后才能开启rpc远程调用能力
-  ////这里使用睡眠来保证
-  std::cout << "raftServer node:" << m_me << " start to sleep to wait all ohter raftnode start!!!!" << std::endl;
+  std::cout << "raftServer node:" << m_me << " start to sleep to wait all other raftnode start!!!!" << std::endl;
   sleep(6);
   std::cout << "raftServer node:" << m_me << " wake up!!!! start to connect other raftnode" << std::endl;
-  // gRPC方式读取raft节点ip/port并连接
-  std::vector<std::pair<std::string, short> > ipPortVt;
-  std::ifstream conf(nodeInforFileName);
-  std::string line;
-  int idx = 0;
-  while (std::getline(conf, line)) {
-    std::istringstream iss(line);
-    std::string ip;
-    short port;
-    if (!(iss >> ip >> port)) continue; // 跳过格式不对的行
-    ipPortVt.emplace_back(ip, port);
-    ++idx;
+
+  // 读取所有raft节点ip、port，并进行连接（兼容 node0ip=... node0port=... 格式）
+  std::vector<std::pair<std::string, short>> ipPortVt;
+  {
+      std::ifstream conf(nodeInforFileName);
+      std::string line;
+      std::vector<std::string> ips;
+      std::vector<short> ports;
+      while (std::getline(conf, line)) {
+          if (line.empty()) continue;
+          size_t eq = line.find('=');
+          if (eq == std::string::npos) continue;
+          std::string key = line.substr(0, eq);
+          std::string value = line.substr(eq + 1);
+          if (key.find("ip") != std::string::npos) {
+              ips.push_back(value);
+          } else if (key.find("port") != std::string::npos) {
+              ports.push_back(static_cast<short>(std::stoi(value)));
+          }
+      }
+      size_t n = std::min(ips.size(), ports.size());
+      for (size_t i = 0; i < n; ++i) {
+          ipPortVt.emplace_back(ips[i], ports[i]);
+      }
   }
-  std::vector<std::shared_ptr<RaftRpcUtil> > servers;
+
+  std::vector<std::shared_ptr<RaftRpcUtil>> servers;
   for (int i = 0; i < ipPortVt.size(); ++i) {
     if (i == m_me) {
       servers.push_back(nullptr);
-      continue;
+    } else {
+      std::cout << "ip = " << ipPortVt[i].first << "  port = " << ipPortVt[i].second << std::endl;
+      servers.push_back(std::make_shared<RaftRpcUtil>(ipPortVt[i].first, ipPortVt[i].second));
     }
-    std::string otherNodeIp = ipPortVt[i].first;
-    short otherNodePort = ipPortVt[i].second;
-    servers.push_back(std::make_shared<RaftRpcUtil>(otherNodeIp, otherNodePort));
-    std::cout << "node" << m_me << " 连接node" << i << " success!" << std::endl;
   }
-  sleep(ipPortVt.size() - me);  //等待所有节点相互连接成功，再启动raft
   m_raftNode->init(servers, m_me, persister, applyChan);
   // kv的server直接与raft通信，但kv不直接与raft通信，所以需要把ApplyMsg的chan传递下去用于通信，两者的persist也是共用的
 
-  // kvdb初始化
+  //////////////////////////////////
+
+  // You may need initialization code here.
+  // m_kvDB; //kvdb初始化
   m_skipList;
   waitApplyCh;
   m_lastRequestId;
@@ -426,3 +438,4 @@ KvServer::KvServer(int me, int maxraftstate, std::string nodeInforFileName, shor
   std::thread t2(&KvServer::ReadRaftApplyCommandLoop, this);  //马上向其他节点宣告自己就是leader
   t2.join();  //由於ReadRaftApplyCommandLoop一直不會結束，达到一直卡在这的目的
 }
+

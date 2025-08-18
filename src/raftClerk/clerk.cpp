@@ -1,15 +1,11 @@
-//
-// Created by swx on 23-6-4.
-//
 #include "clerk.h"
-
 #include "raftServerRpcUtil.h"
-
 #include "util.h"
 
 #include <string>
 #include <vector>
 #include <fstream>
+
 std::string Clerk::Get(std::string key) {
   m_requestId++;
   auto requestId = m_requestId;
@@ -80,14 +76,27 @@ void Clerk::Append(std::string key, std::string value) { PutAppend(key, value, "
 void Clerk::Init(std::string configFileName) {
   // 获取所有raft节点ip、port，并进行连接
   std::vector<std::pair<std::string, short>> ipPortVt;
-  std::ifstream conf(configFileName);
-  std::string line;
-  while (std::getline(conf, line)) {
-    std::istringstream iss(line);
-    std::string ip;
-    short port;
-    if (!(iss >> ip >> port)) continue; // 跳过格式不对的行
-    ipPortVt.emplace_back(ip, port);
+  {
+      std::ifstream conf(configFileName);
+      std::string line;
+      std::vector<std::string> ips;
+      std::vector<short> ports;
+      while (std::getline(conf, line)) {
+          if (line.empty()) continue;
+          size_t eq = line.find('=');
+          if (eq == std::string::npos) continue;
+          std::string key = line.substr(0, eq);
+          std::string value = line.substr(eq + 1);
+          if (key.find("ip") != std::string::npos) {
+              ips.push_back(value);
+          } else if (key.find("port") != std::string::npos) {
+              ports.push_back(static_cast<short>(std::stoi(value)));
+          }
+      }
+      size_t n = std::min(ips.size(), ports.size());
+      for (size_t i = 0; i < n; ++i) {
+          ipPortVt.emplace_back(ips[i], ports[i]);
+      }
   }
   // 进行gRPC连接
   for (const auto& item : ipPortVt) {

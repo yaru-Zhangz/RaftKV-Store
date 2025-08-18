@@ -1,7 +1,3 @@
-//
-// Created by swx on 23-12-21.
-//
-
 #include <iostream>
 #include <memory>
 #include <grpcpp/grpcpp.h>

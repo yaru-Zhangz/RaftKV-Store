@@ -1,7 +1,9 @@
 #include "util.h"
 #include <chrono>
 #include <cstdarg>
+#include <netdb.h>
 #include <cstdio>
+#include <fstream>
 #include <ctime>
 #include <iomanip>
 
@@ -66,3 +68,29 @@ void DPrintf(const char *format, ...) {
     va_end(args);
   }
 }
+
+std::string writeConfig(int nodeIndex, short port) {
+  //获取可用ip
+  char *ipC;
+  char hname[128];
+  struct hostent *hent;
+  gethostname(hname, sizeof(hname));
+  hent = gethostbyname(hname);
+  for (int i = 0; hent->h_addr_list[i]; i++) {
+    ipC = inet_ntoa(*(struct in_addr *)(hent->h_addr_list[i]));  // IP地址
+  }
+  std::string ip = std::string(ipC);
+  std::string node = "node" + std::to_string(nodeIndex);
+  std::ofstream outfile;
+  outfile.open("test.conf", std::ios::app);  //打开文件并追加写入
+  if (!outfile.is_open()) {
+    std::cout << "打开文件失败！" << std::endl;
+    exit(EXIT_FAILURE);
+  }
+  outfile << node + "ip=" + ip << std::endl;
+  outfile << node + "port=" + std::to_string(port) << std::endl;
+  outfile.close();
+  return ip;
+}
+
+

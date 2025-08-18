@@ -1,7 +1,3 @@
-//
-// Created by swx on 23-12-28.
-//
-
 #include "raftRpcUtil.h"
 
 #include <grpcpp/grpcpp.h>
