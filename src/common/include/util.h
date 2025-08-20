@@ -111,72 +111,52 @@ class LockQueue {
   std::mutex m_mutex;
   std::condition_variable m_condvariable;
 };
-// 两个对锁的管理用到了RAII的思想，防止中途出现问题而导致资源无法释放的问题！！！
-// std::lock_guard 和 std::unique_lock 都是 C++11 中用来管理互斥锁的工具类，它们都封装了 RAII（Resource Acquisition Is
-// Initialization）技术，使得互斥锁在需要时自动加锁，在不需要时自动解锁，从而避免了很多手动加锁和解锁的繁琐操作。
-// std::lock_guard 是一个模板类，它的模板参数是一个互斥量类型。当创建一个 std::lock_guard
-// 对象时，它会自动地对传入的互斥量进行加锁操作，并在该对象被销毁时对互斥量进行自动解锁操作。std::lock_guard
-// 不能手动释放锁，因为其所提供的锁的生命周期与其绑定对象的生命周期一致。 std::unique_lock
-// 也是一个模板类，同样的，其模板参数也是互斥量类型。不同的是，std::unique_lock 提供了更灵活的锁管理功能。可以通过
-// lock()、unlock()、try_lock() 等方法手动控制锁的状态。当然，std::unique_lock 也支持 RAII
-// 技术，即在对象被销毁时会自动解锁。另外， std::unique_lock 还支持超时等待和可中断等待的操作。
 
 // 这个Op是kv传递给raft的command
 class Op {
- public:
-  // Your definitions here.
-  // Field names must start with capital letters,
-  // otherwise RPC will break.
-  std::string Operation;  // "Get" "Put" "Append"
-  std::string Key;
-  std::string Value;
-  std::string ClientId;  //客户端号码
-  int RequestId;         //客户端号码请求的Request的序列号，为了保证线性一致性
-                         // IfDuplicate bool // Duplicate command can't be applied twice , but only for PUT and APPEND
+public:
+    std::string Operation;  // "Get" "Put" "Append"
+    std::string Key;
+    std::string Value;
+    std::string ClientId;  // 客户端ID
+    int RequestId;         // 客户端ID请求的Request的序列号，为了保证线性一致性
+            
+public:
+  // TODO: 正常字符中不能包含|，待升级序列化方法为protobuf
+    std::string asString() const {
+        std::stringstream ss;
+        boost::archive::text_oarchive oa(ss);
+        oa << *this;
+        return ss.str();
+    }
 
- public:
-  // todo
-  //为了协调raftRPC中的command只设置成了string,这个的限制就是正常字符中不能包含|
-  //当然后期可以换成更高级的序列化方法，比如protobuf
-  std::string asString() const {
-    std::stringstream ss;
-    boost::archive::text_oarchive oa(ss);
+    bool parseFromString(std::string str) {
+        std::stringstream iss(str);
+        boost::archive::text_iarchive ia(iss);
+        ia >> *this;
+        return true;  
+    }
 
-    // write class instance to archive
-    oa << *this;
-    // close archive
+public:
+    friend std::ostream& operator<<(std::ostream& os, const Op& obj) {
+        os << "[MyClass:Operation{" + obj.Operation + "},Key{" + obj.Key + "},Value{" + obj.Value + "},ClientId{" +
+                obj.ClientId + "},RequestId{" + std::to_string(obj.RequestId) + "}";  // 在这里实现自定义的输出格式
+        return os;
+    }
 
-    return ss.str();
-  }
-
-  bool parseFromString(std::string str) {
-    std::stringstream iss(str);
-    boost::archive::text_iarchive ia(iss);
-    // read class state from archive
-    ia >> *this;
-    return true;  // todo : 解析失敗如何處理，要看一下boost庫了
-  }
-
- public:
-  friend std::ostream& operator<<(std::ostream& os, const Op& obj) {
-    os << "[MyClass:Operation{" + obj.Operation + "},Key{" + obj.Key + "},Value{" + obj.Value + "},ClientId{" +
-              obj.ClientId + "},RequestId{" + std::to_string(obj.RequestId) + "}";  // 在这里实现自定义的输出格式
-    return os;
-  }
-
- private:
-  friend class boost::serialization::access;
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version) {
-    ar& Operation;
-    ar& Key;
-    ar& Value;
-    ar& ClientId;
-    ar& RequestId;
-  }
+private:
+    friend class boost::serialization::access;
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int version) {
+        ar& Operation;
+        ar& Key;
+        ar& Value;
+        ar& ClientId;
+        ar& RequestId;
+    }
 };
 
-///////////////////////////////////////////////kvserver reply err to clerk
+// kvserver reply err to clerk
 
 const std::string OK = "OK";
 const std::string ErrNoKey = "ErrNoKey";

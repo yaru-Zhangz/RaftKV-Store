@@ -1,132 +1,102 @@
-//
-// Created by swx on 23-6-1.
-//
-
 #ifndef SKIP_LIST_ON_RAFT_KVSERVER_H
 #define SKIP_LIST_ON_RAFT_KVSERVER_H
 
+#include <mutex>
+#include <iostream>
+#include <unordered_map>
 #include <boost/any.hpp>
+#include <boost/foreach.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/text_oarchive.hpp>
-#include <boost/foreach.hpp>
 #include <boost/serialization/export.hpp>
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/unordered_map.hpp>
 #include <boost/serialization/vector.hpp>
-#include <iostream>
-#include <mutex>
-#include <unordered_map>
+
 #include "kvServerRPC.grpc.pb.h"
 #include "raft.h"
 #include "skipList.h"
 
 class KvServer : public raftKVRpcProctoc::kvServerRpc::Service {
- private:
-  std::mutex m_mtx;
-  int m_me;
-  std::shared_ptr<Raft> m_raftNode;
-  std::shared_ptr<LockQueue<ApplyMsg> > applyChan;  // kvServer和raft节点的通信管道
-  int m_maxRaftState;                               // snapshot if log grows this big
+private:
 
-  // Your definitions here.
-  std::string m_serializedKVData;  // todo ： 序列化后的kv数据，理论上可以不用，但是目前没有找到特别好的替代方法
-  SkipList<std::string, std::string> m_skipList; // 实际的KV数据库
+    std::shared_ptr<Raft> m_raftNode;
+    std::shared_ptr<LockQueue<ApplyMsg> > applyChan;  // Raft与KVServer之间的消息队列，Raft日志应用后通过它通知KVServer
 
-  std::unordered_map<int, LockQueue<Op> *> waitApplyCh;
-  // index(raft) -> chan  //？？？字段含义   waitApplyCh是一个map，键是int，值是Op类型的管道
+    std::string m_serializedKVData;                   // 用于序列化KV数据的临时字符串 
+    SkipList<std::string, std::string> m_skipList;    // 实际的KV数据库，底层用跳表实现
+    std::unordered_map<int, LockQueue<Op>*> waitApplyCh;    // 为每一个正在等待Raft日志应用结果的客户端请求，建立一个“等待队列”
+    std::unordered_map<std::string, int> m_lastRequestId;  // 记录每个客户端最后一次请求的ID，用于幂等性和去重
 
-  std::unordered_map<std::string, int> m_lastRequestId;  // clientid -> requestID，存储每个客户端最终一个请求的ID
+    int m_lastSnapShotRaftLogIndex;                    // 记录最近一次快照对应的日志索引
+    int m_maxRaftState;                               // Raft日志超过该大小时触发快照
+    std::mutex m_mtx;
+    int m_me;
+public:
+    KvServer() = delete;
+    KvServer(int me, int maxraftstate, std::string nodeInforFileName, short port);
 
-  // last SnapShot point , raftIndex
-  int m_lastSnapShotRaftLogIndex;
+    void StartKVServer();   // 预留，暂未实现
+    void DprintfKVDB();    // 在调试模式下打印KV数据库
 
- public:
-  KvServer() = delete;
+    void ExecuteAppendOpOnKVDB(Op op);
+    void ExecuteGetOpOnKVDB(Op op, std::string *value, bool *exist);
+    void ExecutePutOpOnKVDB(Op op);
 
-  KvServer(int me, int maxraftstate, std::string nodeInforFileName, short port);
+    void GetCommandFromRaft(ApplyMsg message);  // 从这里调用上面三个函数
 
-  // 没有实现这个函数
-  void StartKVServer();
+    bool ifRequestDuplicate(std::string ClientId, int RequestId);   // 判断请求是否重复，保证幂等性
 
-  // 在调试模式下打印KV数据库
-  void DprintfKVDB();
-
-  // 下面三个函数都是在GetCommandFromRaft中调用的
-  void ExecuteAppendOpOnKVDB(Op op);
-  void ExecuteGetOpOnKVDB(Op op, std::string *value, bool *exist);
-  void ExecutePutOpOnKVDB(Op op);
-
-  /**
-   * 從raft節點中獲取消息  （不要誤以爲是執行【GET】命令）
-   * @param message
-   */
-  // 在这个函数中解析
-  void GetCommandFromRaft(ApplyMsg message);
-
-  bool ifRequestDuplicate(std::string ClientId, int RequestId);
-
-  // clerk 使用RPC远程调用下面这两个方法
-  // 原有业务逻辑接口，供gRPC接口调用
-  void PutAppend(const raftKVRpcProctoc::PutAppendArgs *args, raftKVRpcProctoc::PutAppendReply *reply);
-  void Get(const raftKVRpcProctoc::GetArgs *args, raftKVRpcProctoc::GetReply *reply);
-
-  ////一直等待raft传来的applyCh
-  void ReadRaftApplyCommandLoop();
-
-  void ReadSnapShotToInstall(std::string snapshot);
-
-  bool SendMessageToWaitChan(const Op &op, int raftIndex);
-
-  // 检查是否需要制作快照，需要的话就向raft之下制作快照
-  void IfNeedToSendSnapShotCommand(int raftIndex, int proportion);
-
-  // Handler the SnapShot from kv.rf.applyCh
-  void GetSnapShotFromRaft(ApplyMsg message);
-
-  std::string MakeSnapShot();
+    // gRPC远程调用接口
+    void PutAppend(const raftKVRpcProctoc::PutAppendArgs *args, raftKVRpcProctoc::PutAppendReply *reply);
+    void Get(const raftKVRpcProctoc::GetArgs *args, raftKVRpcProctoc::GetReply *reply);
 
 
- public:  // for gRPC
-  grpc::Status Get(grpc::ServerContext* context, const raftKVRpcProctoc::GetArgs* request, raftKVRpcProctoc::GetReply* response) override;
-  grpc::Status PutAppend(grpc::ServerContext* context, const raftKVRpcProctoc::PutAppendArgs* request, raftKVRpcProctoc::PutAppendReply* response) override;
+    void ReadRaftApplyCommandLoop();                          // 不断从applyChan取出Raft应用的日志或快照，应用到KVServer
+    bool SendMessageToWaitChan(const Op &op, int raftIndex);  // 向等待队列推送操作，唤醒等待的RPC
+    
+    // 快照相关操作
+    void ReadSnapShotToInstall(std::string snapshot);        
+    void IfNeedToSendSnapShotCommand(int raftIndex, int proportion);
+    void GetSnapShotFromRaft(ApplyMsg message);
+    std::string MakeSnapShot();
 
-  /////////////////serialiazation start ///////////////////////////////
-  // notice ： func serialize
- private:
-  friend class boost::serialization::access;
+public:  
+    grpc::Status Get(grpc::ServerContext* context, const raftKVRpcProctoc::GetArgs* request, raftKVRpcProctoc::GetReply* response) override;
+    grpc::Status PutAppend(grpc::ServerContext* context, const raftKVRpcProctoc::PutAppendArgs* request, raftKVRpcProctoc::PutAppendReply* response) override;
 
-  // When the class Archive corresponds to an output archive, the
-  // & operator is defined similar to <<.  Likewise, when the class Archive
-  // is a type of input archive the & operator is defined similar to >>.
-  template <class Archive>
-  void serialize(Archive &ar, const unsigned int version)  //这里面写需要序列话和反序列化的字段
-  {
-    ar &m_serializedKVData;
+private:
+    friend class boost::serialization::access;
 
-    // ar & m_kvDB;
-    ar &m_lastRequestId;
-  }
+    template <class Archive>
+    void serialize(Archive &ar, const unsigned int version)  //这里面写需要序列话和反序列化的字段
+    {
+        ar &m_serializedKVData;
+        ar &m_lastRequestId;
+    }
 
-  std::string getSnapshotData() {
-    m_serializedKVData = m_skipList.dump_file();
-    std::stringstream ss;
-    boost::archive::text_oarchive oa(ss);
-    oa << *this;
-    m_serializedKVData.clear();
-    return ss.str();
-  }
+    // 将当前对象序列化为字符串
+    std::string getSnapshotData() {
+        m_serializedKVData = m_skipList.dump_file();
+        std::stringstream ss;
+        boost::archive::text_oarchive oa(ss);
+        oa << *this;
+        m_serializedKVData.clear();
+        return ss.str();
+    }
 
-  void parseFromString(const std::string &str) {
-    std::stringstream ss(str);
-    boost::archive::text_iarchive ia(ss);
-    ia >> *this;
-    m_skipList.load_file(m_serializedKVData);
-    m_serializedKVData.clear();
-  }
+    // 从字符串反序列化恢复对象状态
+    void parseFromString(const std::string &str) {
+        std::stringstream ss(str);
+        boost::archive::text_iarchive ia(ss);
+        ia >> *this;
+        m_skipList.load_file(m_serializedKVData);
+        m_serializedKVData.clear();
+    }
 
-  /////////////////serialiazation end ///////////////////////////////
+
 };
 
-#endif  // SKIP_LIST_ON_RAFT_KVSERVER_H
+#endif 
