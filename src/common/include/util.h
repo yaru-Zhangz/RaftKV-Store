@@ -57,56 +57,37 @@ std::chrono::_V2::system_clock::time_point now();
 std::chrono::milliseconds getRandomizedElectionTimeout();
 void sleepNMilliseconds(int N);
 
-// ////////////////////////异步写日志的日志队列
-// read is blocking!!! LIKE  go chan
-// 
+
 template <typename T>
 class LockQueue {
- public:
-  // 多个worker线程都会写日志queue
-  void Push(const T& data) {
-    std::lock_guard<std::mutex> lock(m_mutex);  //使用lock_gurad，即RAII的思想保证锁正确释放
-    m_queue.push(data);
-    m_condvariable.notify_one();
-  }
-
-  // 一个线程读日志queue，写日志文件
-  T Pop() {
-    std::unique_lock<std::mutex> lock(m_mutex);
-    while (m_queue.empty()) {
-      // 日志队列为空，线程进入wait状态
-      m_condvariable.wait(lock);  //这里用unique_lock是因为lock_guard不支持解锁，而unique_lock支持
-    }
-    T data = m_queue.front();
-    m_queue.pop();
-    return data;
-  }
-
-  bool timeOutPop(int timeout, T* ResData)  // 添加一个超时时间参数，默认为 50 毫秒
-  {
-    std::unique_lock<std::mutex> lock(m_mutex);
-
-    // 获取当前时间点，并计算出超时时刻
-    auto now = std::chrono::system_clock::now();
-    auto timeout_time = now + std::chrono::milliseconds(timeout);
-
-    // 在超时之前，不断检查队列是否为空
-    while (m_queue.empty()) {
-      // 如果已经超时了，就返回一个空对象
-      if (m_condvariable.wait_until(lock, timeout_time) == std::cv_status::timeout) {
-        return false;
-      } else {
-        continue;
-      }
+public:
+    // 向队列中推送一个元素，并唤醒一个正在等待的线程
+    void Push(const T& data) {
+        std::lock_guard<std::mutex> lock(m_mutex); 
+        m_queue.push(data);
+        m_condvariable.notify_one();
     }
 
-    T data = m_queue.front();
-    m_queue.pop();
-    *ResData = data;
-    return true;
-  }
-
- private:
+    // 如果队列为空，当前线程会阻塞直到有数据可用
+    T Pop() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_condvariable.wait(lock, [this] { return !m_queue.empty(); });
+        T data = std::move(m_queue.front()); 
+        m_queue.pop();                       
+        return data;
+    }
+  
+    // 尝试在指定超时时间内弹出一个元素
+    bool timeOutPop(int timeout, T* ResData) {
+        std::unique_lock<std::mutex> lock(m_mutex); 
+        if (!m_condvariable.wait_for(lock, std::chrono::milliseconds(timeout), [this] { return !m_queue.empty(); })) {
+            return false; 
+        }
+        *ResData = std::move(m_queue.front()); 
+        m_queue.pop();                        
+        return true;
+    }
+private:
   std::queue<T> m_queue;
   std::mutex m_mutex;
   std::condition_variable m_condvariable;

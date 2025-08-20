@@ -54,9 +54,9 @@ void KvServer::Get(const raftKVRpcProctoc::GetArgs *args, raftKVRpcProctoc::GetR
     int raftIndex = -1;
     int _ = -1;
     bool isLeader = false;
-    m_raftNode->Start(op, &raftIndex, &_, &isLeader);  
+    m_raftNode->Start(op, &raftIndex, &_, &isLeader);   // 将本次操作作为日志提交到Raft
 
-    // 如果不是leader直接返回错误
+    // 如果不是leader直接返回错误，客户端会重试到其他节点
     if (!isLeader) {
         reply->set_err(ErrWrongLeader);
         return;
@@ -64,27 +64,22 @@ void KvServer::Get(const raftKVRpcProctoc::GetArgs *args, raftKVRpcProctoc::GetR
 
     // 为本次请求创建等待队列，阻塞等待 Raft 日志应用结果
     m_mtx.lock();
-
     if (waitApplyCh.find(raftIndex) == waitApplyCh.end()) {
         waitApplyCh.insert(std::make_pair(raftIndex, new LockQueue<Op>()));
     }
     auto chForRaftIndex = waitApplyCh[raftIndex];
-
     m_mtx.unlock();  
 
-    // timeout
     Op raftCommitOp;
 
-    if (!chForRaftIndex->timeOutPop(CONSENSUS_TIMEOUT, &raftCommitOp)) {
-        //        DPrintf("[GET TIMEOUT!!!]From Client %d (Request %d) To Server %d, key %v, raftIndex %d", args.ClientId,
-        //        args.RequestId, kv.me, op.Key, raftIndex)
+    // 阻塞等待Raft日志被应用
+    if (!chForRaftIndex->timeOutPop(CONSENSUS_TIMEOUT, &raftCommitOp)) {    // 超时
         int _ = -1;
         bool isLeader = false;
         m_raftNode->GetState(&_, &isLeader);
 
+        // 如果本次请求是重复请求，且自己还是leader就从本地数据库直接返回结果
         if (ifRequestDuplicate(op.ClientId, op.RequestId) && isLeader) {
-            //如果超时，代表raft集群不保证已经commitIndex该日志，但是如果是已经提交过的get请求，是可以再执行的。
-            // 不会违反线性一致性
             std::string value;
             bool exist = false;
             ExecuteGetOpOnKVDB(op, &value, &exist);
@@ -96,7 +91,7 @@ void KvServer::Get(const raftKVRpcProctoc::GetArgs *args, raftKVRpcProctoc::GetR
                 reply->set_value("");
             }
         } else {
-            reply->set_err(ErrWrongLeader);  //返回这个，其实就是让clerk换一个节点重试
+            reply->set_err(ErrWrongLeader);  // 让客户端重试
         }
     } else {
         if (raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId) {
@@ -112,7 +107,7 @@ void KvServer::Get(const raftKVRpcProctoc::GetArgs *args, raftKVRpcProctoc::GetR
             }
         } else {
             reply->set_err(ErrWrongLeader);
-          }
+        }
     }
     m_mtx.lock(); 
     auto tmp = waitApplyCh[raftIndex];
@@ -129,10 +124,13 @@ void KvServer::GetCommandFromRaft(ApplyMsg message) {
         "[KvServer::GetCommandFromRaft-kvserver{%d}] , Got Command --> Index:{%d} , ClientId {%s}, RequestId {%d}, "
         "Opreation {%s}, Key :{%s}, Value :{%s}",
         m_me, message.CommandIndex, &op.ClientId, op.RequestId, &op.Operation, &op.Key, &op.Value);
+    
+    // 如果日志索引小于等于当前快照点，说明已经被快照覆盖
     if (message.CommandIndex <= m_lastSnapShotRaftLogIndex) {
         return;
     }
 
+    // 判断请求是否已经被执行过
     if (!ifRequestDuplicate(op.ClientId, op.RequestId)) {
         if (op.Operation == "Put") {
             ExecutePutOpOnKVDB(op);
@@ -140,17 +138,15 @@ void KvServer::GetCommandFromRaft(ApplyMsg message) {
         if (op.Operation == "Append") {
             ExecuteAppendOpOnKVDB(op);
         }
-        //  kv.lastRequestId[op.ClientId] = op.RequestId  在Executexxx函数里面更新的
-    }
-    // 到这里kvDB已经制作了快照
-    if (m_maxRaftState != -1) {
-        IfNeedToSendSnapShotCommand(message.CommandIndex, 9);
-        // 如果raft的log太大（大于指定的比例）就把制作快照
     }
 
-    // Send message to the chan of op.ClientId
+    if (m_maxRaftState != -1) {
+        IfNeedToSendSnapShotCommand(message.CommandIndex, 9);
+    }
+
     SendMessageToWaitChan(op, message.CommandIndex);
 }
+
 
 bool KvServer::ifRequestDuplicate(std::string ClientId, int RequestId) {
     std::lock_guard<std::mutex> lg(m_mtx);
@@ -238,13 +234,14 @@ void KvServer::PutAppend(const raftKVRpcProctoc::PutAppendArgs *args, raftKVRpcP
 
 void KvServer::ReadRaftApplyCommandLoop() {
     while (true) {
+        // Raft通知KVServer有新日志需要应用
         auto message = applyChan->Pop(); 
         DPrintf("---------------tmp-------------[func-KvServer::ReadRaftApplyCommandLoop()-kvserver{%d}] 收到了下raft的消息", m_me);
         
-        if (message.CommandValid) {
+        if (message.CommandValid) {         // 普通日志
             GetCommandFromRaft(message);
         }
-        if (message.SnapshotValid) {
+        if (message.SnapshotValid) {        // 快照消息
             GetSnapShotFromRaft(message);
         }
     }
@@ -254,27 +251,15 @@ void KvServer::ReadRaftApplyCommandLoop() {
 //  关于快照raft层与persist的交互：保存kvserver传来的snapshot；生成leaderInstallSnapshot RPC的时候也需要读取snapshot；
 //  因此snapshot的具体格式是由kvserver层来定的，raft只负责传递这个东西
 //  snapShot里面包含kvserver需要维护的persist_lastRequestId 以及kvDB真正保存的数据persist_kvdb
+
 void KvServer::ReadSnapShotToInstall(std::string snapshot) {
   if (snapshot.empty()) {
-    // bootstrap without any state?
     return;
   }
   parseFromString(snapshot);
-
-  //    r := bytes.NewBuffer(snapshot)
-  //    d := labgob.NewDecoder(r)
-  //
-  //    var persist_kvdb map[string]string  //理应快照
-  //    var persist_lastRequestId map[int64]int //快照这个为了维护线性一致性
-  //
-  //    if d.Decode(&persist_kvdb) != nil || d.Decode(&persist_lastRequestId) != nil {
-  //                DPrintf("KVSERVER %d read persister got a problem!!!!!!!!!!",kv.me)
-  //        } else {
-  //        kv.kvDB = persist_kvdb
-  //        kv.lastRequestId = persist_lastRequestId
-  //    }
 }
 
+// 当Raft日志被应用到状态机，将对应的操作推送到等待该日志索引的等待队列中，从而唤醒正在等待该日志应用结果的主线程
 bool KvServer::SendMessageToWaitChan(const Op &op, int raftIndex) {
   std::lock_guard<std::mutex> lg(m_mtx);
   DPrintf(

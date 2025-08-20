@@ -944,34 +944,34 @@ grpc::Status Raft::RequestVote(grpc::ServerContext* context, const raftRpcProcto
 }
 
 void Raft::Start(Op command, int* newLogIndex, int* newLogTerm, bool* isLeader) {
-  std::lock_guard<std::mutex> lg1(m_mtx);
-  //    m_mtx.lock();
-  //    Defer ec1([this]()->void {
-  //       m_mtx.unlock();
-  //    });
-  if (m_status != Leader) {
-    DPrintf("[func-Start-rf{%d}]  is not leader");
-    *newLogIndex = -1;
-    *newLogTerm = -1;
-    *isLeader = false;
-    return;
-  }
+    std::lock_guard<std::mutex> lg1(m_mtx);
+    //    m_mtx.lock();
+    //    Defer ec1([this]()->void {
+    //       m_mtx.unlock();
+    //    });
+    if (m_status != Leader) {
+        DPrintf("[func-Start-rf{%d}]  is not leader");
+        *newLogIndex = -1;
+        *newLogTerm = -1;
+        *isLeader = false;
+        return;
+    }
 
-  raftRpcProctoc::LogEntry newLogEntry;
-  newLogEntry.set_command(command.asString());
-  newLogEntry.set_logterm(m_currentTerm);
-  newLogEntry.set_logindex(getNewCommandIndex());
-  m_logs.emplace_back(newLogEntry);
+    raftRpcProctoc::LogEntry newLogEntry;
+    newLogEntry.set_command(command.asString());
+    newLogEntry.set_logterm(m_currentTerm);
+    newLogEntry.set_logindex(getNewCommandIndex());
+    m_logs.emplace_back(newLogEntry);
 
-  int lastLogIndex = getLastLogIndex();
+    int lastLogIndex = getLastLogIndex();
 
-  // leader应该不停的向各个Follower发送AE来维护心跳和保持日志同步，目前的做法是新的命令来了不会直接执行，而是等待leader的心跳触发
-  DPrintf("[func-Start-rf{%d}]  lastLogIndex:%d,command:%s\n", m_me, lastLogIndex, &command);
-  // rf.timer.Reset(10) //接收到命令后马上给follower发送,改成这样不知为何会出现问题，待修正 todo
-  persist();
-  *newLogIndex = newLogEntry.logindex();
-  *newLogTerm = newLogEntry.logterm();
-  *isLeader = true;
+    // leader应该不停的向各个Follower发送AE来维护心跳和保持日志同步，目前的做法是新的命令来了不会直接执行，而是等待leader的心跳触发
+    DPrintf("[func-Start-rf{%d}]  lastLogIndex:%d,command:%s\n", m_me, lastLogIndex, &command);
+    // rf.timer.Reset(10) //接收到命令后马上给follower发送,改成这样不知为何会出现问题，待修正 todo
+    persist();
+    *newLogIndex = newLogEntry.logindex();
+    *newLogTerm = newLogEntry.logterm();
+    *isLeader = true;
 }
 
 /*
