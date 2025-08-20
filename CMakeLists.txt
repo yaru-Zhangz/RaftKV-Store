@@ -25,7 +25,6 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 # 设置项目编译头文件搜索路径 -I
 # 目前可能存在路径污染的问题，需要进一步解决
 include_directories(${PROJECT_SOURCE_DIR}/src/common/include)
-include_directories(${PROJECT_SOURCE_DIR}/src/fiber/include)
 include_directories(${PROJECT_SOURCE_DIR}/example)
 include_directories(${PROJECT_SOURCE_DIR}/src/raftCore/include)
 include_directories(${PROJECT_SOURCE_DIR}/src/raftRpcPro/include)
@@ -40,7 +39,7 @@ add_subdirectory(src)
 # example包含了使用的示例代码
 add_subdirectory(example)
 
-add_library(skip_list_on_raft STATIC ${src_fiber} ${rpc_example} ${raftsource} ${src_raftCore} ${src_raftRpcPro} ${src_common})
+add_library(skip_list_on_raft STATIC ${rpc_example} ${raftsource} ${src_raftCore} ${src_raftRpcPro} ${src_common})
 
 # 主库链接gRPC和protobuf
 target_link_libraries(skip_list_on_raft

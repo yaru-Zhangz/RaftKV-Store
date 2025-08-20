@@ -18,7 +18,6 @@
 #include "ApplyMsg.h"
 #include "Persister.h"
 #include "config.h"
-#include "monsoon.h"
 #include "raftRpcUtil.h"
 #include "util.h"
 //  表示节点的网络状态
@@ -67,8 +66,6 @@ class Raft : public raftRpcProctoc::raftRpc::Service {
 
   int m_lastSnapshotIncludeIndex; // 快照中最后一个日志的索引
   int m_lastSnapshotIncludeTerm;  // 快照中最后一个日志的任期
-
-  std::unique_ptr<monsoon::IOManager> m_ioManager = nullptr;  // 协程调度器
 
 public:
   // 处理三种RPC请求的内部实现

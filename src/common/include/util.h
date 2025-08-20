@@ -20,16 +20,15 @@
 
 template <class F>
 class DeferClass {
- public:
-  DeferClass(F&& f) : m_func(std::forward<F>(f)) {}
-  DeferClass(const F& f) : m_func(f) {}
-  ~DeferClass() { m_func(); }
+public:
+    DeferClass(F&& f) : m_func(std::forward<F>(f)) {}
+    DeferClass(const F& f) : m_func(f) {}
+    ~DeferClass() { m_func(); }
 
-  DeferClass(const DeferClass& e) = delete;
-  DeferClass& operator=(const DeferClass& e) = delete;
-
- private:
-  F m_func;
+    DeferClass(const DeferClass& e) = delete;
+    DeferClass& operator=(const DeferClass& e) = delete;
+private:
+    F m_func;
 };
 
 #define _CONCAT(a, b) a##b

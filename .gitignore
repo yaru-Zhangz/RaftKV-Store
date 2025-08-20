@@ -8,3 +8,4 @@ lib
 *.out
 *.a.vs/
 .vs/
+out/
