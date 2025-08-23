@@ -945,10 +945,6 @@ grpc::Status Raft::RequestVote(grpc::ServerContext* context, const raftRpcProcto
 
 void Raft::Start(Op command, int* newLogIndex, int* newLogTerm, bool* isLeader) {
     std::lock_guard<std::mutex> lg1(m_mtx);
-    //    m_mtx.lock();
-    //    Defer ec1([this]()->void {
-    //       m_mtx.unlock();
-    //    });
     if (m_status != Leader) {
         DPrintf("[func-Start-rf{%d}]  is not leader");
         *newLogIndex = -1;

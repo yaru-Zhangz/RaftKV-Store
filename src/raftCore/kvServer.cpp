@@ -14,7 +14,6 @@ void KvServer::DprintfKVDB() {
 }
 
 void KvServer::ExecuteAppendOpOnKVDB(Op op) {
-
     m_mtx.lock();
     m_skipList.insert_set_element(op.Key, op.Value);
     m_lastRequestId[op.ClientId] = op.RequestId;    // 记录该客户端最新请求ID
