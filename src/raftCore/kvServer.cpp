@@ -9,7 +9,7 @@ void KvServer::DprintfKVDB() {
     }
     std::lock_guard<std::mutex> lg(m_mtx);
     DEFER {
-        m_skipList.display_list();
+        m_skipList.display_skiplist();
     };
 }
 
