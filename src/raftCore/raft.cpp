@@ -158,39 +158,39 @@ bool Raft::CondInstallSnapshot(int lastIncludedTerm, int lastIncludedIndex, std:
 }
 
 void Raft::doElection() {
-  std::lock_guard<std::mutex> g(m_mtx);
-  if (m_status != Leader) {
-    DPrintf("[       ticker-func-rf(%d)              ]  选举定时器到期且不是leader，开始选举 \n", m_me);
+    std::lock_guard<std::mutex> g(m_mtx);
+    if (m_status != Leader) {
+        DPrintf("[       ticker-func-rf(%d)              ]  选举定时器到期且不是leader，开始选举 \n", m_me);
 
-    m_status = Candidate;   // 将自己的状态转为Candidate
-    m_currentTerm += 1;     // 增加当前任期号
-    m_votedFor = m_me;      // 给自己投票
-    persist();              // 持久化
-    std::shared_ptr<int> votedNum = std::make_shared<int>(1);   // 初始化投票数为1
+        m_status = Candidate;   // 将自己的状态转为Candidate
+        m_currentTerm += 1;     // 增加当前任期号
+        m_votedFor = m_me;      // 给自己投票
+        persist();              // 持久化
+        std::shared_ptr<int> votedNum = std::make_shared<int>(1);   // 初始化投票数为1
 
-    m_lastResetElectionTime = now();    //	重置选举定时器
+        m_lastResetElectionTime = now();    //	重置选举定时器
 
-    DPrintf("m_peers.size = {%d}", m_peers.size());
-    for (int i = 0; i < m_peers.size(); i++) {
-        if (i == m_me) {
-            continue;
+        DPrintf("m_peers.size = {%d}", m_peers.size());
+        for (int i = 0; i < m_peers.size(); i++) {
+            if (i == m_me) {
+                continue;
+            }
+            // 构造投票请求，包含：当前任期号、候选人ID、最后的日志索引和任期
+            int lastLogIndex = -1, lastLogTerm = -1;
+            getLastLogIndexAndTerm(&lastLogIndex, &lastLogTerm);  // 获取最后一个log的term和下标
+
+            std::shared_ptr<raftRpcProctoc::RequestVoteArgs> requestVoteArgs =
+                std::make_shared<raftRpcProctoc::RequestVoteArgs>();
+            requestVoteArgs->set_term(m_currentTerm);
+            requestVoteArgs->set_candidateid(m_me);
+            requestVoteArgs->set_lastlogindex(lastLogIndex);
+            requestVoteArgs->set_lastlogterm(lastLogTerm);
+            auto requestVoteReply = std::make_shared<raftRpcProctoc::RequestVoteReply>();
+
+            std::thread t(&Raft::sendRequestVote, this, i, requestVoteArgs, requestVoteReply, votedNum);  
+            t.detach();
         }
-        // 构造投票请求，包含：当前任期号、候选人ID、最后的日志索引和任期
-        int lastLogIndex = -1, lastLogTerm = -1;
-        getLastLogIndexAndTerm(&lastLogIndex, &lastLogTerm);  // 获取最后一个log的term和下标
-
-        std::shared_ptr<raftRpcProctoc::RequestVoteArgs> requestVoteArgs =
-            std::make_shared<raftRpcProctoc::RequestVoteArgs>();
-        requestVoteArgs->set_term(m_currentTerm);
-        requestVoteArgs->set_candidateid(m_me);
-        requestVoteArgs->set_lastlogindex(lastLogIndex);
-        requestVoteArgs->set_lastlogterm(lastLogTerm);
-        auto requestVoteReply = std::make_shared<raftRpcProctoc::RequestVoteReply>();
-
-        std::thread t(&Raft::sendRequestVote, this, i, requestVoteArgs, requestVoteReply, votedNum);  
-        t.detach();
     }
-  }
 }
 
 // 发送心跳
@@ -258,7 +258,6 @@ void Raft::doHeartBeat() {
 
 // 超时选举定时器 -> 每个raft节点一个
 void Raft::electionTimeOutTicker() {
-
     while (true) {
         while (m_status == Leader) {
             usleep(HeartBeatTimeout);   // 当节点已经是Leader时，不需要进行选举超时检测

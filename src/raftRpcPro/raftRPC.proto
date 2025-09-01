@@ -1,58 +1,53 @@
 syntax = "proto3";
 
-
 package raftRpcProctoc; //所在的命名空间
 
-
 // 日志实体
-message LogEntry{
-    bytes Command  =1;
-	int32 LogTerm   =2;
-	int32 LogIndex  = 3;
+message LogEntry {
+    bytes Command = 1;
+	int32 LogTerm = 2;
+	int32 LogIndex = 3;
 }
-// AppendEntriesArgs 由leader复制log条目，也可以当做是心跳连接，注释中的rf为leader节点
+
+// 追加日志RPC Request
 message AppendEntriesArgs  {
-	//	下面几个参数和论文中相同
-	int32 Term        =1;
-	int32 LeaderId       =2;
-	int32 PrevLogIndex =3;
-	int32 PrevLogTerm  =4;
-	repeated LogEntry Entries  = 5;
-	int32 LeaderCommit  = 6;
+	int32 Term  = 1;                   // 自己当前的任期号
+	int32 LeaderId = 2;                // 自己的ID
+	int32 PrevLogIndex = 3;            // 前一个日志的日志索引
+	int32 PrevLogTerm = 4;             // 前一个日志的任期号
+	repeated LogEntry Entries = 5;     // 日志实体
+	int32 LeaderCommit = 6;            // leader已提交的日志号
 }
 
-// AppendEntriesReply 论文中没有提及返回要设置哪些状态
+// 追加日志RPC Reply
 message AppendEntriesReply {
-	int32 Term =1;             // leader的term可能是与Follower不同的，
-	bool Success      =2;
-	int32 UpdateNextIndex = 3;               //快速调整leader对应的nextIndex
-	int32 AppState        =4; // 用来标识节点（网络）状态
+	int32 Term = 1;             // leader的term可能是与Follower不同的，
+	bool Success = 2;
+	int32 UpdateNextIndex = 3;  // 用于快速调整leader对应的nextIndex
+	int32 AppState = 4;         // 用来标识节点的网络状态
 }
 
+// 请求投票RPC Request
 message RequestVoteArgs  {
-	int32 Term         =1;
-	int32 CandidateId  =2;
-	int32 LastLogIndex =3;
-	int32 LastLogTerm  =4;
+	int32 Term = 1;             // 自己当前的任期号
+	int32 CandidateId = 2;      // 自己的ID
+	int32 LastLogIndex = 3;     // 自己最后一个日志的索引
+	int32 LastLogTerm = 4;      // 自己最后一个日志的任期
 }
 
-// RequestVoteReply
-// example RequestVote RPC reply structure.
-// field names must start with capital letters!
-message RequestVoteReply  {
-	// Your data here (2A).
-	int32 Term        =1;
-	bool VoteGranted  =2;
-	int32 VoteState   =3;
+// 请求投票RPC Reply
+message RequestVoteReply {
+	int32 Term = 1;             // 自己当前的任期号
+	bool VoteGranted = 2;       // 自己会不会投票给这个candidate
+	int32 VoteState = 3;
 }
 
-
-message InstallSnapshotRequest  {
-	int32 LeaderId                 =1;
-	int32 Term                     =2;
-	int32 LastSnapShotIncludeIndex =3;
-	int32 LastSnapShotIncludeTerm  =4;
-	bytes Data                     =5;//快照信息，当然是用bytes来传递
+message InstallSnapshotRequest {
+	int32 LeaderId                 = 1;
+	int32 Term                     = 2;
+	int32 LastSnapShotIncludeIndex = 3;
+	int32 LastSnapShotIncludeTerm  = 4;
+	bytes Data                     = 5;//快照信息，当然是用bytes来传递
 }
 
 // InstallSnapshotResponse 只用返回Term，因为对于快照只要Term是符合的就是无条件接受的
