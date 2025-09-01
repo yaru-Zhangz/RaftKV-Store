@@ -252,52 +252,52 @@ void KvServer::ReadRaftApplyCommandLoop() {
 //  snapShot里面包含kvserver需要维护的persist_lastRequestId 以及kvDB真正保存的数据persist_kvdb
 
 void KvServer::ReadSnapShotToInstall(std::string snapshot) {
-  if (snapshot.empty()) {
-    return;
-  }
-  parseFromString(snapshot);
+    if (snapshot.empty()) {
+        return;
+    }
+    parseFromString(snapshot);
 }
 
 // 当Raft日志被应用到状态机，将对应的操作推送到等待该日志索引的等待队列中，从而唤醒正在等待该日志应用结果的主线程
 bool KvServer::SendMessageToWaitChan(const Op &op, int raftIndex) {
-  std::lock_guard<std::mutex> lg(m_mtx);
-  DPrintf(
-      "[RaftApplyMessageSendToWaitChan--> raftserver{%d}] , Send Command --> Index:{%d} , ClientId {%d}, RequestId "
-      "{%d}, Opreation {%v}, Key :{%v}, Value :{%v}",
-      m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation, &op.Key, &op.Value);
+    std::lock_guard<std::mutex> lg(m_mtx);
+    DPrintf(
+        "[RaftApplyMessageSendToWaitChan--> raftserver{%d}] , Send Command --> Index:{%d} , ClientId {%d}, RequestId "
+        "{%d}, Opreation {%v}, Key :{%v}, Value :{%v}",
+        m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation, &op.Key, &op.Value);
 
-  if (waitApplyCh.find(raftIndex) == waitApplyCh.end()) {
-    return false;
-  }
-  waitApplyCh[raftIndex]->Push(op);
-  DPrintf(
-      "[RaftApplyMessageSendToWaitChan--> raftserver{%d}] , Send Command --> Index:{%d} , ClientId {%d}, RequestId "
-      "{%d}, Opreation {%v}, Key :{%v}, Value :{%v}",
-      m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation, &op.Key, &op.Value);
-  return true;
+    if (waitApplyCh.find(raftIndex) == waitApplyCh.end()) {
+        return false;
+    }
+    waitApplyCh[raftIndex]->Push(op);
+    DPrintf(
+        "[RaftApplyMessageSendToWaitChan--> raftserver{%d}] , Send Command --> Index:{%d} , ClientId {%d}, RequestId "
+        "{%d}, Opreation {%v}, Key :{%v}, Value :{%v}",
+        m_me, raftIndex, &op.ClientId, op.RequestId, &op.Operation, &op.Key, &op.Value);
+    return true;
 }
 
 void KvServer::IfNeedToSendSnapShotCommand(int raftIndex, int proportion) {
-  if (m_raftNode->GetRaftStateSize() > m_maxRaftState / 10.0) {
-    // Send SnapShot Command
-    auto snapshot = MakeSnapShot();
-    m_raftNode->Snapshot(raftIndex, snapshot);
-  }
+    if (m_raftNode->GetRaftStateSize() > m_maxRaftState / 10.0) {
+        // Send SnapShot Command
+        auto snapshot = MakeSnapShot();
+        m_raftNode->Snapshot(raftIndex, snapshot);
+    }
 }
 
 void KvServer::GetSnapShotFromRaft(ApplyMsg message) {
-  std::lock_guard<std::mutex> lg(m_mtx);
+    std::lock_guard<std::mutex> lg(m_mtx);
 
-  if (m_raftNode->CondInstallSnapshot(message.SnapshotTerm, message.SnapshotIndex, message.Snapshot)) {
-    ReadSnapShotToInstall(message.Snapshot);
-    m_lastSnapShotRaftLogIndex = message.SnapshotIndex;
-  }
+    if (m_raftNode->CondInstallSnapshot(message.SnapshotTerm, message.SnapshotIndex, message.Snapshot)) {
+        ReadSnapShotToInstall(message.Snapshot);
+        m_lastSnapShotRaftLogIndex = message.SnapshotIndex;
+    }
 }
 
 std::string KvServer::MakeSnapShot() {
-  std::lock_guard<std::mutex> lg(m_mtx);
-  std::string snapshotData = getSnapshotData();
-  return snapshotData;
+    std::lock_guard<std::mutex> lg(m_mtx);
+    std::string snapshotData = getSnapshotData();
+    return snapshotData;
 }
 
 grpc::Status KvServer::Get(grpc::ServerContext* context, const raftKVRpcProctoc::GetArgs* request, raftKVRpcProctoc::GetReply* response) {
